@@ -25,8 +25,8 @@ GRUB_TERMINAL_CONFIG='@TERMINAL_CONFIG@'
 GRUB_TITLE='@TITLE@'
 GRUB_TIMEOUT='@TIMEOUT@'
 
-DEMO_VOLUME_LABEL="OPENWRT-ROOT"
-DEMO_PART_SIZE=512   # MiB — OpenWrt x86 default is 104; 512 gives headroom
+OPENWRT_VOLUME_LABEL="OPENWRT-ROOT"
+OPENWRT_PART_SIZE=512   # MiB — OpenWrt x86 default is 104; 512 gives headroom
 
 echo ""
 echo "=========================================================="
@@ -65,8 +65,8 @@ esac
 
 # ------------------------------------------------ extract the payload ---
 payload_dir=$(mktemp -d)
-demo_mnt=$(mktemp -d)
-trap 'cd /; umount "$demo_mnt" 2>/dev/null; rm -rf "$payload_dir" "$demo_mnt"' EXIT
+openwrt_mnt=$(mktemp -d)
+trap 'cd /; umount "$openwrt_mnt" 2>/dev/null; rm -rf "$payload_dir" "$openwrt_mnt"' EXIT
 
 echo "Extracting installer payload..."
 dd if="$0" bs="$PAYLOAD_OFFSET" skip=1 2>/dev/null | tar -x -C "$payload_dir"
@@ -74,34 +74,34 @@ dd if="$0" bs="$PAYLOAD_OFFSET" skip=1 2>/dev/null | tar -x -C "$payload_dir"
 [ -f "$payload_dir/vmlinuz"       ] || { echo "ERROR: vmlinuz missing"       >&2; exit 1; }
 
 # --------------------------------------------- create target partition ---
-prev_part=$(sgdisk -p "$blk_dev" | awk -v lbl="$DEMO_VOLUME_LABEL" '$NF==lbl {print $1}')
+prev_part=$(sgdisk -p "$blk_dev" | awk -v lbl="$OPENWRT_VOLUME_LABEL" '$NF==lbl {print $1}')
 if [ -n "$prev_part" ]; then
-    echo "Removing previous $DEMO_VOLUME_LABEL partition (#$prev_part)..."
+    echo "Removing previous $OPENWRT_VOLUME_LABEL partition (#$prev_part)..."
     sgdisk -d "$prev_part" "$blk_dev" >/dev/null
     partprobe "$blk_dev" || true
 fi
 
 last_part=$(sgdisk -p "$blk_dev" | awk '/^ *[0-9]+ /{p=$1} END{print p+0}')
-demo_part=$(( last_part + 1 ))
-echo "Creating ${blk_dev}${blk_suffix}${demo_part} (${DEMO_PART_SIZE} MiB, label $DEMO_VOLUME_LABEL)..."
-sgdisk --new=${demo_part}::+${DEMO_PART_SIZE}M \
-       --attributes=${demo_part}:=:0x0 \
-       --change-name=${demo_part}:"$DEMO_VOLUME_LABEL" \
+openwrt_part=$(( last_part + 1 ))
+echo "Creating ${blk_dev}${blk_suffix}${openwrt_part} (${OPENWRT_PART_SIZE} MiB, label $OPENWRT_VOLUME_LABEL)..."
+sgdisk --new=${openwrt_part}::+${OPENWRT_PART_SIZE}M \
+       --attributes=${openwrt_part}:=:0x0 \
+       --change-name=${openwrt_part}:"$OPENWRT_VOLUME_LABEL" \
        "$blk_dev" >/dev/null
 partprobe "$blk_dev" || blockdev --rereadpt "$blk_dev" || true
 sleep 1
 
-demo_dev="${blk_dev}${blk_suffix}${demo_part}"
-mkfs.ext4 -F -q -L "$DEMO_VOLUME_LABEL" "$demo_dev"
-mount -t ext4 -o defaults,rw "$demo_dev" "$demo_mnt"
+openwrt_dev="${blk_dev}${blk_suffix}${openwrt_part}"
+mkfs.ext4 -F -q -L "$OPENWRT_VOLUME_LABEL" "$openwrt_dev"
+mount -t ext4 -o defaults,rw "$openwrt_dev" "$openwrt_mnt"
 
 # ----------------------------------------------- populate the rootfs ---
 echo "Extracting OpenWrt root filesystem..."
-tar -xzf "$payload_dir/rootfs.tar.gz" -C "$demo_mnt"
+tar -xzf "$payload_dir/rootfs.tar.gz" -C "$openwrt_mnt"
 
 echo "Installing kernel..."
-mkdir -p "$demo_mnt/boot"
-cp "$payload_dir/vmlinuz" "$demo_mnt/boot/vmlinuz"
+mkdir -p "$openwrt_mnt/boot"
+cp "$payload_dir/vmlinuz" "$openwrt_mnt/boot/vmlinuz"
 
 # ------------------------------------------------ install GRUB to ESP ---
 if [ "$firmware" = "uefi" ]; then
@@ -120,7 +120,7 @@ if [ "$firmware" = "uefi" ]; then
         --no-nvram \
         --bootloader-id="OpenWrt" \
         --efi-directory="/boot/efi" \
-        --boot-directory="$demo_mnt/boot" \
+        --boot-directory="$openwrt_mnt/boot" \
         --recheck "$blk_dev" >/dev/null
 
     for b in $(efibootmgr | awk '/OpenWrt/ {gsub("Boot",""); gsub("\\*",""); print $1}'); do
@@ -134,19 +134,19 @@ else
     echo "Installing GRUB (i386-pc, BIOS)..."
     grub-install \
         --target="i386-pc" \
-        --boot-directory="$demo_mnt/boot" \
+        --boot-directory="$openwrt_mnt/boot" \
         --recheck "$blk_dev" >/dev/null
 fi
 
 # ---------------------------------------------- write target grub.cfg ---
 # The kernel built-in root parser handles root=PARTUUID=... but not
 # root=LABEL=... — query the real PARTUUID and bake it in.
-rootpart_partuuid=$(blkid -s PARTUUID -o value "$demo_dev")
-[ -n "$rootpart_partuuid" ] || { echo "ERROR: cannot read PARTUUID of $demo_dev" >&2; exit 1; }
+rootpart_partuuid=$(blkid -s PARTUUID -o value "$openwrt_dev")
+[ -n "$rootpart_partuuid" ] || { echo "ERROR: cannot read PARTUUID of $openwrt_dev" >&2; exit 1; }
 echo "Root PARTUUID     : $rootpart_partuuid"
 
-mkdir -p "$demo_mnt/boot/grub"
-cat > "$demo_mnt/boot/grub/grub.cfg" <<EOF
+mkdir -p "$openwrt_mnt/boot/grub"
+cat > "$openwrt_mnt/boot/grub/grub.cfg" <<EOF
 $GRUB_SERIAL_CONFIG
 $GRUB_TERMINAL_CONFIG
 
@@ -154,13 +154,13 @@ set default="0"
 set timeout="$GRUB_TIMEOUT"
 
 # GRUB finds this filesystem by ext4 label (set by mkfs.ext4 -L).
-search --no-floppy --label --set=root $DEMO_VOLUME_LABEL
+search --no-floppy --label --set=root $OPENWRT_VOLUME_LABEL
 
 menuentry "$GRUB_TITLE" {
     linux /boot/vmlinuz root=PARTUUID=$rootpart_partuuid rootwait $GRUB_CMDLINE noinitrd
 }
 menuentry "$GRUB_TITLE (PARTLABEL failsafe)" {
-    linux /boot/vmlinuz root=PARTLABEL=$DEMO_VOLUME_LABEL rootwait $GRUB_CMDLINE noinitrd
+    linux /boot/vmlinuz root=PARTLABEL=$OPENWRT_VOLUME_LABEL rootwait $GRUB_CMDLINE noinitrd
 }
 menuentry "$GRUB_TITLE (failsafe mode)" {
     linux /boot/vmlinuz failsafe=true root=PARTUUID=$rootpart_partuuid rootwait $GRUB_CMDLINE noinitrd
@@ -170,14 +170,14 @@ EOF
 onie_grub_frag="${onie_root_dir:-/mnt/onie-boot/onie}/grub.d/50_onie_grub"
 if [ -x "$onie_grub_frag" ]; then
     echo "Appending ONIE boot entry to grub.cfg..."
-    "$onie_grub_frag" >> "$demo_mnt/boot/grub/grub.cfg" 2>/dev/null || true
+    "$onie_grub_frag" >> "$openwrt_mnt/boot/grub/grub.cfg" 2>/dev/null || true
 fi
 
 # --------------------------------------------------- finish and exit ---
 sync
-umount "$demo_mnt"
+umount "$openwrt_mnt"
 trap - EXIT
-rm -rf "$payload_dir" "$demo_mnt"
+rm -rf "$payload_dir" "$openwrt_mnt"
 
 if [ -x /bin/onie-nos-mode ]; then
     /bin/onie-nos-mode -s

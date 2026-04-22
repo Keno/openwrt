@@ -79,6 +79,34 @@ define Build/grub-install
 		$@
 endef
 
+define Build/onie-installer
+	rm -rf $@.onie
+	mkdir -p $@.onie/payload
+	# Payload: rootfs tarball + kernel. ONIE runs the wrapper script
+	# which unpacks these, creates a new GPT partition, and installs.
+	$(TAR) --numeric-owner --owner=0 --group=0 --sort=name \
+		$(if $(SOURCE_DATE_EPOCH),--mtime=@$(SOURCE_DATE_EPOCH)) \
+		-C $(TARGET_DIR)/ -cf - . | gzip -9n > $@.onie/payload/rootfs.tar.gz
+	$(CP) $(KDIR)/$(KERNEL_NAME) $@.onie/payload/vmlinuz
+	$(TAR) --numeric-owner --owner=0 --group=0 --sort=name \
+		$(if $(SOURCE_DATE_EPOCH),--mtime=@$(SOURCE_DATE_EPOCH)) \
+		-C $@.onie/payload -cf $@.onie/payload.tar .
+	# Generate the installer script with all @…@ placeholders substituted
+	# except __PYLOAD__ (10 chars), which is replaced with the script's
+	# own byte-length after the first pass — a length-preserving swap.
+	sed \
+		-e 's#@SERIAL_CONFIG@#$(strip $(GRUB_SERIAL_CONFIG))#g' \
+		-e 's#@TERMINAL_CONFIG@#$(strip $(GRUB_TERMINAL_CONFIG))#g' \
+		-e 's#@CMDLINE@#$(strip $(BOOTOPTS) $(GRUB_CONSOLE_CMDLINE))#g' \
+		-e 's#@TITLE@#$(GRUB_TITLE)#g' \
+		-e 's#@TIMEOUT@#$(GRUB_TIMEOUT)#g' \
+		./onie-install.sh.in > $@.onie/installer.sh
+	script_len=$$(wc -c < $@.onie/installer.sh | tr -d ' '); \
+	sed -i "s/__PYLOAD__/$$(printf '%010d' $$script_len)/" $@.onie/installer.sh
+	cat $@.onie/installer.sh $@.onie/payload.tar > $@
+	chmod +x $@
+endef
+
 define Build/iso
 	$(CP) $(KDIR)/$(KERNEL_NAME) $@.boot/boot/vmlinuz
 	cat \
@@ -114,6 +142,7 @@ define Device/Default
   IMAGE/combined-efi.vdi := grub-config efi | combined efi | grub-install efi | qemu-image vdi
   IMAGE/combined-efi.vmdk := grub-config efi | combined efi | grub-install efi | qemu-image vmdk
   IMAGE/combined-efi.vhdx := grub-config efi | combined efi | grub-install efi | qemu-image vhdx -o subformat=dynamic
+  IMAGE/onie-installer.bin := onie-installer
   ifeq ($(CONFIG_TARGET_IMAGES_GZIP),y)
     IMAGES-y := rootfs.img.gz
     IMAGES-$$(CONFIG_GRUB_IMAGES) += combined.img.gz
@@ -123,6 +152,7 @@ define Device/Default
     IMAGES-$$(CONFIG_GRUB_IMAGES) += combined.img
     IMAGES-$$(CONFIG_GRUB_EFI_IMAGES) += combined-efi.img
   endif
+  IMAGES-$$(CONFIG_ONIE_INSTALLER_IMAGES) += onie-installer.bin
   KERNEL := kernel-bin
   KERNEL_INSTALL := 1
   KERNEL_NAME := bzImage

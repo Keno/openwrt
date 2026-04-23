@@ -159,9 +159,6 @@ search --no-floppy --label --set=root $OPENWRT_VOLUME_LABEL
 menuentry "$GRUB_TITLE" {
     linux /boot/vmlinuz root=PARTUUID=$rootpart_partuuid rootwait $GRUB_CMDLINE noinitrd
 }
-menuentry "$GRUB_TITLE (PARTLABEL failsafe)" {
-    linux /boot/vmlinuz root=PARTLABEL=$OPENWRT_VOLUME_LABEL rootwait $GRUB_CMDLINE noinitrd
-}
 menuentry "$GRUB_TITLE (failsafe mode)" {
     linux /boot/vmlinuz failsafe=true root=PARTUUID=$rootpart_partuuid rootwait $GRUB_CMDLINE noinitrd
 }

@@ -140,8 +140,11 @@ fi
 
 # ---------------------------------------------- write target grub.cfg ---
 # The kernel built-in root parser handles root=PARTUUID=... but not
-# root=LABEL=... -- query the real PARTUUID and bake it in.
-rootpart_partuuid=$(blkid -s PARTUUID -o value "$openwrt_dev")
+# root=LABEL=... -- query the real PARTUUID and bake it in. We read it
+# from the GPT via sgdisk since busybox blkid in ONIE doesn't support
+# `-s PARTUUID -o value` and returns the device path instead.
+rootpart_partuuid=$(sgdisk -i "$openwrt_part" "$blk_dev" \
+    | awk '/Partition unique GUID:/ {print tolower($NF)}')
 [ -n "$rootpart_partuuid" ] || { echo "ERROR: cannot read PARTUUID of $openwrt_dev" >&2; exit 1; }
 echo "Root PARTUUID     : $rootpart_partuuid"
 

@@ -142,7 +142,10 @@ define Device/Default
   IMAGE/combined-efi.vdi := grub-config efi | combined efi | grub-install efi | qemu-image vdi
   IMAGE/combined-efi.vmdk := grub-config efi | combined efi | grub-install efi | qemu-image vmdk
   IMAGE/combined-efi.vhdx := grub-config efi | combined efi | grub-install efi | qemu-image vhdx -o subformat=dynamic
-  IMAGE/onie-installer.bin := onie-installer
+  # onie-installer bundles a tar of TARGET_DIR and is independent of the
+  # rootfs filesystem type, so it's an ARTIFACT (single build), not an IMAGE
+  # (which would be iterated per-fstype and produce identical copies).
+  ARTIFACT/onie-installer.bin := onie-installer
   ifeq ($(CONFIG_TARGET_IMAGES_GZIP),y)
     IMAGES-y := rootfs.img.gz
     IMAGES-$$(CONFIG_GRUB_IMAGES) += combined.img.gz
@@ -152,7 +155,6 @@ define Device/Default
     IMAGES-$$(CONFIG_GRUB_IMAGES) += combined.img
     IMAGES-$$(CONFIG_GRUB_EFI_IMAGES) += combined-efi.img
   endif
-  IMAGES-$$(CONFIG_ONIE_INSTALLER_IMAGES) += onie-installer.bin
   KERNEL := kernel-bin
   KERNEL_INSTALL := 1
   KERNEL_NAME := bzImage
@@ -160,6 +162,7 @@ define Device/Default
     ARTIFACTS-$$(CONFIG_GRUB_IMAGES) += image.iso
     ARTIFACTS-$$(CONFIG_GRUB_EFI_IMAGES) += image-efi.iso
   endif
+  ARTIFACTS-$$(CONFIG_ONIE_INSTALLER_IMAGES) += onie-installer.bin
   ifeq ($(CONFIG_VDI_IMAGES),y)
     IMAGES-$$(CONFIG_GRUB_IMAGES) += combined.vdi
     IMAGES-$$(CONFIG_GRUB_EFI_IMAGES) += combined-efi.vdi
